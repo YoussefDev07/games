@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لعبة ضربات الجزاء</title>
+    <!-- تضمين خط مناسب يدعم العربية والتصميم الجذاب -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* أنماط CSS مخصصة للعبة */
+        :root {
+            --green-field: #4CAF50;
+            --white-lines: #ffffff;
+            --blue-sky: #87CEEB;
+            --ball-color: #333333;
+            --text-color: #1a1a1a;
+            --header-bg: #2C3E50;
+            --header-text: #ECF0F1;
+            --primary-button: #E74C3C;
+            --primary-hover: #C0392B;
+        }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #F4F4F4; /* خلفية خفيفة */
+        }
+
+        .game-container {
+            background-color: #FFFFFF;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border-radius: 20px;
+            padding: 20px;
+            width: 95%;
+            max-width: 600px;
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        h1 {
+            color: var(--header-bg);
+            margin-top: 0;
+            font-weight: 700;
+        }
+
+        canvas {
+            display: block;
+            background-color: var(--blue-sky); /* سماء */
+            border: 5px solid #bdc3c7;
+            border-radius: 10px;
+            touch-action: manipulation; /* لتحسين استجابة اللمس */
+            width: 100%; /* اجعل الكانفاس يتكيف مع العرض */
+            height: auto; /* الحفاظ على النسبة */
+            max-height: 400px;
+        }
+
+        .score-board {
+            display: flex;
+            justify-content: space-around;
+            margin: 15px 0;
+            padding: 10px;
+            background-color: var(--header-bg);
+            color: var(--header-text);
+            border-radius: 10px;
+            font-size: 1.2rem;
+        }
+
+        .message-box {
+            min-height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #ECF0F1;
+            color: var(--text-color);
+            border-radius: 10px;
+            font-weight: 700;
+        }
+
+        button {
+            background-color: var(--primary-button);
+            color: var(--header-text);
+            border: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 700;
+            transition: background-color 0.3s, transform 0.1s;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            display: none; /* يتم إظهاره فقط عند الحاجة */
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+            transform: translateY(-2px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        /* استجابة اللعبة للشاشات الصغيرة */
+        @media (max-width: 480px) {
+            .game-container {
+                padding: 10px;
+                margin: 10px auto;
+            }
+            h1 {
+                font-size: 1.5rem;
+            }
+            .score-board {
+                font-size: 1rem;
+            }
+            button {
+                padding: 10px 20px;
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="game-container">
+    <h1>🏆 ضربات الجزاء ⚽</h1>
+    
+    <div class="score-board">
+        <div>الأهداف: <span id="player-score">0</span></div> <!-- تم التحديث هنا: النتيجة -> الأهداف -->
+        <div>جولات: <span id="round-count">1 / 5</span></div>
+    </div>
+
+    <canvas id="penaltyCanvas"></canvas>
+
+    <div class="message-box" id="message-box">
+        انقر (أو المس الشاشة) لتحديد هدف التسديد!
+    </div>
+
+    <button id="restart-button">إعادة بدء اللعبة</button>
+</div>
+
+<script>
+    // الحصول على عناصر Canvas و DOM
+    const canvas = document.getElementById('penaltyCanvas');
+    const ctx = canvas.getContext('2d');
+    const playerScoreEl = document.getElementById('player-score');
+    const roundCountEl = document.getElementById('round-count');
+    const messageBox = document.getElementById('message-box');
+    const restartButton = document.getElementById('restart-button');
+
+    // إعداد أبعاد اللعبة (القياسات الأساسية)
+    const GAME_WIDTH = 500;
+    const GAME_HEIGHT = 400;
+    
+    canvas.width = GAME_WIDTH;
+    canvas.height = GAME_HEIGHT;
+
+    // ثوابت اللعبة وحالة البداية
+    const MAX_ROUNDS = 5;
+    let gameState = {
+        score: 0,
+        round: 1,
+        phase: 'aiming', // المراحل: 'aiming', 'shooting', 'result'
+        ball: { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 30, radius: 10, targetX: null, targetY: null, velocityX: 0, velocityY: 0, active: false, initialY: GAME_HEIGHT - 30 },
+        keeper: { x: GAME_WIDTH / 2, y: 75, width: 60, height: 80, saveX: null, saveY: null, isSaving: false },
+        animationFrame: null // لتتبع إطار الرسوم المتحركة
+    };
+
+    // ----------------------
+    // وظائف الرسم (Drawing Functions)
+    // ----------------------
+
+    /**
+     * رسم الملعب والهدف.
+     */
+    function drawField() {
+        // خلفية الملعب (العشب)
+        ctx.fillStyle = '#4CAF50'; 
+        ctx.fillRect(0, 150, GAME_WIDTH, GAME_HEIGHT - 150);
+        
+        // منطقة الجزاء (أخضر أفتح قليلاً)
+        ctx.fillStyle = '#66BB6A';
+        ctx.fillRect(GAME_WIDTH / 2 - 150, 200, 300, GAME_HEIGHT - 200);
+
+        // خط المرمى
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, GAME_HEIGHT - 40);
+        ctx.lineTo(GAME_WIDTH, GAME_HEIGHT - 40);
+        ctx.stroke();
+
+        // نقطة الجزاء (Ball initial position)
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(gameState.ball.x, gameState.ball.initialY, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // المرمى (Goal Posts and Net)
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        // العارضة
+        ctx.moveTo(GAME_WIDTH / 2 - 100, 40);
+        ctx.lineTo(GAME_WIDTH / 2 + 100, 40);
+        // القائم الأيمن
+        ctx.moveTo(GAME_WIDTH / 2 + 100, 40);
+        ctx.lineTo(GAME_WIDTH / 2 + 100, 100);
+        // القائم الأيسر
+        ctx.moveTo(GAME_WIDTH / 2 - 100, 40);
+        ctx.lineTo(GAME_WIDTH / 2 - 100, 100);
+        ctx.stroke();
+
+        // شبكة المرمى
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 1;
+        // خطوط أفقية
+        for (let y = 45; y < 100; y += 10) {
+            ctx.beginPath();
+            ctx.moveTo(GAME_WIDTH / 2 - 100, y);
+            ctx.lineTo(GAME_WIDTH / 2 + 100, y);
+            ctx.stroke();
+        }
+        // خطوط عمودية
+        for (let x = GAME_WIDTH / 2 - 95; x < GAME_WIDTH / 2 + 100; x += 10) {
+            ctx.beginPath();
+            ctx.moveTo(x, 40);
+            ctx.lineTo(x, 100);
+            ctx.stroke();
+        }
+    }
+
+    /**
+     * رسم الكرة في موقعها الحالي.
+     */
+    function drawBall() {
+        ctx.fillStyle = gameState.ball.active ? '#1A1A1A' : '#333333';
+        ctx.beginPath();
+        ctx.arc(gameState.ball.x, gameState.ball.y, gameState.ball.radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // إضافة بعض التفاصيل للكرة
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(gameState.ball.x - 3, gameState.ball.y - 3, 2, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    /**
+     * رسم حارس المرمى.
+     */
+    function drawKeeper() {
+        const k = gameState.keeper;
+        
+        // جسم الحارس (Body)
+        ctx.fillStyle = '#3498DB'; // زي أزرق
+        ctx.fillRect(k.x - k.width / 2, k.y, k.width, k.height);
+        
+        // رأس الحارس (Head)
+        ctx.fillStyle = '#F4D03F'; // لون البشرة / الشعر
+        ctx.beginPath();
+        ctx.arc(k.x, k.y, k.width / 4, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // الأيدي (Arms) - تبدو وكأنها متجهة للأعلى قليلاً
+        ctx.fillStyle = '#2C3E50'; // لون القفازات
+        const armLength = k.height / 2;
+        const armWidth = 10;
+        
+        // الذراع الأيسر
+        ctx.fillRect(k.x - k.width / 2 - armWidth, k.y + 10, armWidth, armLength);
+        // الذراع الأيمن
+        ctx.fillRect(k.x + k.width / 2, k.y + 10, armWidth, armLength);
+    }
+
+    /**
+     * رسم المؤشر المستهدف (Target Marker) إذا كان في وضع التصويب.
+     */
+    function drawTarget() {
+        if (gameState.ball.targetX !== null && gameState.phase === 'aiming') {
+            const tx = gameState.ball.targetX;
+            const ty = gameState.ball.targetY;
+            
+            ctx.strokeStyle = 'rgba(231, 76, 60, 0.8)'; // أحمر شفاف
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]); // خط متقطع
+            
+            // رسم علامة X
+            ctx.beginPath();
+            ctx.moveTo(tx - 10, ty - 10);
+            ctx.lineTo(tx + 10, ty + 10);
+            ctx.moveTo(tx + 10, ty - 10);
+            ctx.lineTo(tx - 10, ty + 10);
+            ctx.stroke();
+            
+            ctx.setLineDash([]); // إعادة ضبط الخط إلى صلب
+        }
+    }
+
+    // ----------------------
+    // وظائف منطق اللعبة (Game Logic Functions)
+    // ----------------------
+
+    /**
+     * تهيئة وإعادة تعيين اللعبة لجولة جديدة.
+     */
+    function resetRound() {
+        // إعادة تعيين الكرة إلى نقطة البداية
+        gameState.ball.x = GAME_WIDTH / 2;
+        gameState.ball.y = gameState.ball.initialY;
+        gameState.ball.targetX = null;
+        gameState.ball.targetY = null;
+        gameState.ball.velocityX = 0;
+        gameState.ball.velocityY = 0;
+        gameState.ball.active = false;
+        
+        // إعادة تعيين حارس المرمى إلى المركز
+        gameState.keeper.x = GAME_WIDTH / 2;
+        gameState.keeper.saveX = null;
+        gameState.keeper.isSaving = false;
+        
+        // تعيين المرحلة التالية
+        gameState.phase = 'aiming';
+        
+        // تحديث واجهة المستخدم
+        updateUI();
+        
+        // السماح بالتفاعل
+        canvas.addEventListener('click', handleInput);
+        canvas.addEventListener('touchstart', handleInput);
+        restartButton.style.display = 'none';
+        
+        if (gameState.round > MAX_ROUNDS) {
+            endGame();
+        } else {
+             messageBox.textContent = `الجولة ${gameState.round}: انقر (أو المس الشاشة) لتحديد هدف التسديد!`;
+        }
+    }
+
+    /**
+     * تحديث شاشة النتيجة وواجهة المستخدم.
+     */
+    function updateUI() {
+        playerScoreEl.textContent = gameState.score;
+        roundCountEl.textContent = `${gameState.round} / ${MAX_ROUNDS}`;
+    }
+
+    /**
+     * معالجة إدخال المستخدم (النقر/اللمس) لتحديد هدف التسديد.
+     * @param {Event} event - حدث النقر أو اللمس.
+     */
+    function handleInput(event) {
+        if (gameState.phase !== 'aiming') return;
+
+        // تحديد إحداثيات النقر/اللمس داخل Canvas
+        const rect = canvas.getBoundingClientRect();
+        let clientX, clientY;
+
+        if (event.type === 'touchstart') {
+            event.preventDefault(); // منع التمرير على اللمس
+            clientX = event.touches[0].clientX;
+            clientY = event.touches[0].clientY;
+        } else {
+            clientX = event.clientX;
+            clientY = event.clientY;
+        }
+
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        const targetX = (clientX - rect.left) * scaleX;
+        const targetY = (clientY - rect.top) * scaleY;
+
+        // التحقق من أن النقر كان داخل منطقة الهدف (فوق نقطة الجزاء وداخل المرمى)
+        const minX = GAME_WIDTH / 2 - 100;
+        const maxX = GAME_WIDTH / 2 + 100;
+        const minY = 40;
+        const maxY = gameState.ball.initialY - gameState.ball.radius * 2; // لا تسمح بالنقر تحت الكرة
+
+        if (targetX >= minX && targetX <= maxX && targetY >= minY && targetY <= maxY) {
+            gameState.ball.targetX = targetX;
+            gameState.ball.targetY = targetY;
+            
+            // بدء مرحلة التسديد
+            startShot();
+        } else {
+            messageBox.textContent = "الرجاء النقر داخل منطقة المرمى!";
+            setTimeout(() => {
+                messageBox.textContent = "انقر (أو المس الشاشة) لتحديد هدف التسديد!";
+            }, 1000);
+        }
+    }
+
+    /**
+     * بدء عملية التسديد وحركة حارس المرمى.
+     */
+    function startShot() {
+        // إزالة مستمع الحدث لمنع النقر أثناء التسديد
+        canvas.removeEventListener('click', handleInput);
+        canvas.removeEventListener('touchstart', handleInput);
+
+        gameState.phase = 'shooting';
+        messageBox.textContent = "🚀 تسديد! انتظر النتيجة...";
+        
+        // حساب سرعة الكرة
+        // المسافة إلى الهدف
+        const dx = gameState.ball.targetX - gameState.ball.x;
+        const dy = gameState.ball.targetY - gameState.ball.y;
+        
+        // لتسديدة سريعة (مثلاً في 30 خطوة إطار)
+        const totalSteps = 30; 
+        gameState.ball.velocityX = dx / totalSteps;
+        gameState.ball.velocityY = dy / totalSteps;
+        gameState.ball.active = true;
+        
+        // اتخاذ قرار حارس المرمى
+        keeperDecision();
+    }
+
+    /**
+     * اتخاذ قرار حارس المرمى (الذكاء الاصطناعي البسيط).
+     */
+    function keeperDecision() {
+        // حارس المرمى يختار منطقة من 9 مناطق (3x3) أو يبقى في الوسط
+        const zones = [
+            { x: GAME_WIDTH / 2 - 70, y: 70 }, // يسار علوي
+            { x: GAME_WIDTH / 2, y: 70 }, // وسط علوي
+            { x: GAME_WIDTH / 2 + 70, y: 70 }, // يمين علوي
+            { x: GAME_WIDTH / 2 - 70, y: 85 }, // يسار وسط
+            { x: GAME_WIDTH / 2, y: 85 }, // وسط
+            { x: GAME_WIDTH / 2 + 70, y: 85 }, // يمين وسط
+            { x: GAME_WIDTH / 2 - 70, y: 100 }, // يسار سفلي
+            { x: GAME_WIDTH / 2, y: 100 }, // وسط سفلي
+            { x: GAME_WIDTH / 2 + 70, y: 100 }  // يمين سفلي
+        ];
+        
+        // 40% احتمال أن يحاول الحارس صد الكرة في مكان التسديد الفعلي.
+        // 60% احتمال أن يختار نقطة عشوائية من الـ 9 مناطق.
+        
+        let saveTargetX, saveTargetY;
+
+        if (Math.random() < 0.4) {
+             // محاولة توقع الهدف (إذا كان الهدف واضحاً)
+             saveTargetX = gameState.ball.targetX;
+             saveTargetY = gameState.ball.targetY + 15; // يستهدف أسفل الكرة قليلاً للصد
+        } else {
+             // اختيار عشوائي لمنطقة إنقاذ
+             const randomZone = zones[Math.floor(Math.random() * zones.length)];
+             saveTargetX = randomZone.x;
+             saveTargetY = randomZone.y;
+        }
+
+        gameState.keeper.saveX = saveTargetX;
+        gameState.keeper.saveY = saveTargetY;
+        gameState.keeper.isSaving = true;
+    }
+
+
+    /**
+     * تحديث حالة حركة الكرة وحارس المرمى.
+     */
+    function updateGame() {
+        if (gameState.phase === 'shooting' && gameState.ball.active) {
+            // تحديث موقع الكرة
+            gameState.ball.x += gameState.ball.velocityX;
+            gameState.ball.y += gameState.ball.velocityY;
+
+            // تحديد ما إذا كانت الكرة قد وصلت إلى الهدف أو تجاوزته عمودياً
+            const reachedTarget = gameState.ball.velocityY > 0 
+                ? gameState.ball.y >= gameState.ball.targetY 
+                : gameState.ball.y <= gameState.ball.targetY;
+
+            if (reachedTarget) {
+                // إيقاف الكرة عند الهدف بالضبط
+                gameState.ball.x = gameState.ball.targetX;
+                gameState.ball.y = gameState.ball.targetY;
+                gameState.ball.active = false;
+                
+                // تحديد النتيجة
+                checkGoal();
+                
+                // الانتقال إلى مرحلة النتيجة
+                gameState.phase = 'result';
+            }
+
+            // تحديث موقع حارس المرمى (للانتقال نحو نقطة الصد)
+            if (gameState.keeper.isSaving) {
+                const k = gameState.keeper;
+                const speed = 5; // سرعة حركة الحارس
+                
+                // تحريك الحارس أفقياً
+                if (k.x < k.saveX) {
+                    k.x = Math.min(k.x + speed, k.saveX);
+                } else if (k.x > k.saveX) {
+                    k.x = Math.max(k.x - speed, k.saveX);
+                }
+            }
+        }
+    }
+
+    /**
+     * التحقق من تسجيل هدف أو صد الكرة.
+     */
+    function checkGoal() {
+        const ball = gameState.ball;
+        const keeper = gameState.keeper;
+
+        // 1. التحقق من التواجد ضمن حدود المرمى (يجب أن يكون دائماً داخلها بسبب التحقق في handleInput)
+        // 2. التحقق من الصد (هل موقع الكرة يتداخل مع موقع الحارس؟)
+
+        // تحديد مساحة الحارس بعد الحركة
+        const keeperLeft = keeper.x - keeper.width / 2;
+        const keeperRight = keeper.x + keeper.width / 2;
+        const keeperTop = keeper.y;
+        const keeperBottom = keeper.y + keeper.height;
+
+        // اعتبار أن الحارس يصد إذا كانت الكرة في مساحة الصد
+        const isSavedHorizontally = ball.x + ball.radius > keeperLeft && ball.x - ball.radius < keeperRight;
+        const isSavedVertically = ball.y + ball.radius > keeperTop && ball.y - ball.radius < keeperBottom;
+        
+        let isGoal = true;
+
+        if (isSavedHorizontally && isSavedVertically) {
+            // هناك تداخل، صدّ الكرة
+            isGoal = false;
+        }
+
+        // معالجة النتيجة
+        if (isGoal) {
+            gameState.score++;
+            messageBox.textContent = "🥳 هـــدف! تسديدة رائعة!";
+        } else {
+            messageBox.textContent = "✋ صـــد! حارس المرمى كان يقظًا.";
+        }
+
+        // تحديث وعرض زر الإعادة بعد التأخير
+        setTimeout(() => {
+            if (gameState.round < MAX_ROUNDS) {
+                 gameState.round++;
+                 messageBox.textContent += " انقر على زر 'الجولة التالية'.";
+            } else {
+                 endGame();
+                 return;
+            }
+            restartButton.textContent = "الجولة التالية";
+            restartButton.style.display = 'block';
+            restartButton.onclick = resetRound;
+            updateUI();
+        }, 1500); // إظهار النتيجة لمدة 1.5 ثانية
+    }
+    
+    /**
+     * إنهاء اللعبة وعرض النتيجة النهائية.
+     */
+    function endGame() {
+        cancelAnimationFrame(gameState.animationFrame);
+        messageBox.textContent = `انتهت اللعبة! نتيجتك النهائية هي: ${gameState.score} من ${MAX_ROUNDS}.`;
+        restartButton.textContent = "إعادة بدء اللعبة";
+        restartButton.style.display = 'block';
+        
+        // **********************************************
+        // FIX: إعادة تشغيل حلقة الرسوم المتحركة (gameLoop) 
+        // عند النقر على إعادة بدء اللعبة لضمان استمرار الحركة
+        // **********************************************
+        restartButton.onclick = () => {
+            gameState.score = 0;
+            gameState.round = 1;
+            gameLoop(); // إضافة هذه الدالة لإعادة تشغيل الأنميشن
+            resetRound();
+        };
+    }
+
+    // ----------------------
+    // حلقة اللعبة (Game Loop)
+    // ----------------------
+
+    /**
+     * الحلقة الرئيسية للعبة (تُستدعى 60 مرة في الثانية).
+     */
+    function gameLoop() {
+        // 1. مسح الكانفاس بالكامل
+        ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        
+        // 2. الرسم بالترتيب (من الخلف إلى الأمام)
+        drawField();
+        drawKeeper();
+        drawBall();
+        drawTarget(); // رسم المؤشر إذا كان في مرحلة التصويب
+
+        // 3. تحديث المنطق (إذا كانت الكرة في حالة حركة)
+        updateGame();
+        
+        // 4. طلب الإطار التالي
+        gameState.animationFrame = requestAnimationFrame(gameLoop);
+    }
+
+    // تهيئة اللعبة عند تحميل الصفحة
+    window.onload = function() {
+        // تأكد من أن الكانفاس يتمتع بنسبة عرض إلى ارتفاع جيدة على جميع الأجهزة
+        const resizeCanvas = () => {
+            const container = canvas.parentElement;
+            const containerWidth = container.clientWidth;
+            // الحفاظ على نسبة العرض/الارتفاع 5:4
+            canvas.style.height = `${(containerWidth / GAME_WIDTH) * GAME_HEIGHT}px`;
+        };
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        // بدء اللعبة
+        gameLoop();
+        resetRound(); 
+    };
+</script>
+
+</body>
+</html>
