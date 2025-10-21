@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لعبة كرة السلة</title>
+    <!-- تضمين خط بسيط وجميل -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght+400;700&display=swap" rel="stylesheet">
+    <style>
+        /* CSS مخصص لجعل اللعبة تبدو جذابة ومتجاوبة */
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #1a202c; /* خلفية داكنة */
+            color: #e2e8f0;
+            font-family: 'Cairo', sans-serif;
+            padding: 20px;
+        }
+
+        .game-container {
+            background-color: #2d3748; /* لون أغمق للمنطقة المحيطة */
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+            padding: 20px;
+            max-width: 90%;
+        }
+
+        h1 {
+            color: #f6ad55; /* لون برتقالي للعناوين */
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            text-align: center;
+        }
+
+        #gameCanvas {
+            border: 4px solid #4a5568;
+            background-color: #a0aec0; /* لون الملعب الفاتح */
+            display: block;
+            touch-action: none; /* لمنع مشاكل اللمس على الهاتف */
+            border-radius: 8px;
+            width: 100%; /* اجعل العرض متجاوباً */
+            max-width: 600px;
+            height: 400px; /* الارتفاع الافتراضي */
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            max-width: 600px;
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #4a5568;
+            border-radius: 8px;
+        }
+
+        .score-box {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: #90cdf4; /* لون أزرق فاتح */
+        }
+
+        .message-box {
+            font-size: 1.25rem;
+            color: #f6e05e; /* لون أصفر */
+            text-align: center;
+            flex-grow: 1;
+        }
+
+        .reset-button {
+            background-color: #f6ad55;
+            color: #2d3748;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            font-weight: bold;
+            font-family: 'Cairo', sans-serif;
+        }
+
+        .reset-button:hover {
+            background-color: #dd6b20;
+            transform: scale(1.05);
+        }
+
+        /* استجابة للهواتف المحمولة */
+        @media (max-width: 650px) {
+            .game-container {
+                padding: 10px;
+            }
+            #gameCanvas {
+                height: 300px;
+            }
+            .controls {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .score-box, .message-box {
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-container">
+        <h1>إطلاق كرة السلة</h1>
+        <canvas id="gameCanvas"></canvas>
+        <div class="controls">
+            <!-- تغيير "النتيجة" إلى "الأهداف" -->
+            <div class="score-box">الأهداف: <span id="scoreValue">0</span></div>
+            <div class="message-box" id="messageBox">اسحب وحرر لإطلاق الكرة!</div>
+            <button class="reset-button" onclick="resetGame()">إعادة اللعبة</button>
+        </div>
+    </div>
+
+    <script>
+        // احصل على عناصر الـ DOM
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreValue = document.getElementById('scoreValue');
+        const messageBox = document.getElementById('messageBox');
+
+        // متغيرات اللعبة الأساسية
+        let score = 0;
+        let isDragging = false;
+        let startX, startY; // نقطة البداية (حيث يتم النقر لأول مرة)
+        let currentDragX = 0; // NEW: لتتبع موضع المؤشر الحالي أثناء السحب
+        let currentDragY = 0; // NEW: لتتبع موضع المؤشر الحالي أثناء السحب
+        let ball, hoop;
+
+        // ثوابت الفيزياء
+        const GRAVITY = 0.5; // قوة الجاذبية
+        const FRICTION = 0.98; // معامل الاحتكاك/مقاومة الهواء
+
+        // تعريف الكائنات
+        class Ball {
+            constructor(x, y, radius, color) {
+                this.originalX = x;
+                this.originalY = y;
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.color = color;
+                this.vx = 0; // السرعة الأفقية
+                this.vy = 0; // السرعة العمودية
+                this.isLaunched = false;
+                this.canScore = true; // لمنع تسجيل النقاط أكثر من مرة في رمية واحدة
+                this.isAboveRim = false; // لتتبع ما إذا كانت الكرة قد مرت فوق الطوق
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                // تدرج لوني لجعل الكرة ثلاثية الأبعاد قليلاً
+                const gradient = ctx.createRadialGradient(this.x, this.y, this.radius * 0.5, this.x, this.y, this.radius);
+                gradient.addColorStop(0, '#ff9900'); // لون برتقالي فاتح
+                gradient.addColorStop(1, '#cc5500'); // لون برتقالي داكن
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                ctx.closePath();
+
+                // رسم الخطوط على الكرة
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(this.x - this.radius, this.y);
+                ctx.lineTo(this.x + this.radius, this.y);
+                ctx.stroke();
+            }
+
+            update() {
+                if (!this.isLaunched) return;
+
+                // تطبيق الجاذبية
+                this.vy += GRAVITY;
+
+                // تطبيق الاحتكاك
+                this.vx *= FRICTION;
+
+                // تحديث الموضع
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // فحص الاصطدام مع الأرضية (أسفل اللوحة)
+                if (this.y + this.radius > canvas.height) {
+                    this.y = canvas.height - this.radius;
+                    this.vy *= -0.7; // ارتداد مع فقدان للطاقة
+                    this.vx *= 0.8; // فقدان السرعة الأفقية
+
+                    // إيقاف الكرة إذا كانت بطيئة بما فيه الكفاية
+                    if (Math.abs(this.vy) < 2 && Math.abs(this.vx) < 1) {
+                        this.vy = 0;
+                        this.vx = 0;
+                        this.reset();
+                    }
+                }
+
+                // فحص الاصطدام مع الجدران الجانبية
+                if (this.x + this.radius > canvas.width || this.x - this.radius < 0) {
+                    this.vx *= -1;
+                    this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x)); // تثبيت الموضع
+                }
+
+                // فحص الاصطدام مع الطوق واللوحة الخلفية
+                this.checkHoopCollision();
+            }
+
+            checkHoopCollision() {
+                // 1. الاصطدام مع اللوحة الخلفية (Backboard - Front Face)
+                const backboardX_Front = hoop.x + hoop.ringWidth + 5;
+                const backboardY = hoop.y - hoop.backboardHeight + 5;
+                const backboardHeight = hoop.backboardHeight;
+
+                // إذا كانت الكرة تتحرك يميناً وستصطدم باللوحة
+                if (this.isLaunched && this.vx > 0 && 
+                    this.x + this.radius >= backboardX_Front && 
+                    this.x < backboardX_Front && // للتأكد من أنها لم تتجاوزها بعد
+                    this.y + this.radius > backboardY && 
+                    this.y - this.radius < backboardY + backboardHeight) {
+                    
+                    // دفع الكرة للخلف وعكس السرعة
+                    this.x = backboardX_Front - this.radius;
+                    this.vx *= -0.7; 
+                }
+
+
+                // 2. الاصطدام مع الطوق (Rim) - النقطة اليسرى (الأمامية)
+                const rimLeftX = hoop.x;
+                const rimLeftY = hoop.y;
+                const dxLeft = this.x - rimLeftX;
+                const dyLeft = this.y - rimLeftY;
+                const distanceLeft = Math.sqrt(dxLeft * dxLeft + dyLeft * dyLeft);
+
+                if (distanceLeft < this.radius + hoop.rimRadius) {
+                    // حدث اصطدام - تطبيق رد الفعل
+                    const angle = Math.atan2(dyLeft, dxLeft);
+                    const sin = Math.sin(angle);
+                    const cos = Math.cos(angle);
+
+                    // دفع الكرة للخارج قليلاً لتجنب التشابك
+                    this.x = rimLeftX + (this.radius + hoop.rimRadius) * cos;
+                    this.y = rimLeftY + (this.radius + hoop.rimRadius) * sin;
+
+                    // حساب سرعة الارتداد
+                    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                    this.vx = speed * cos * 0.7; // 0.7 هو معامل الارتداد
+                    this.vy = speed * sin * 0.7;
+                }
+
+                // 3. الاصطدام مع الطوق (Rim) - النقطة اليمنى (الخلفية)
+                const rimRightX = hoop.x + hoop.ringWidth;
+                const rimRightY = hoop.y;
+                const dxRight = this.x - rimRightX;
+                const dyRight = this.y - rimRightY;
+                const distanceRight = Math.sqrt(dxRight * dxRight + dyRight * dyRight);
+
+                if (distanceRight < this.radius + hoop.rimRadius) {
+                    // حدث اصطدام - تطبيق رد الفعل
+                    const angle = Math.atan2(dyRight, dxRight);
+                    const sin = Math.sin(angle);
+                    const cos = Math.cos(angle);
+
+                    this.x = rimRightX + (this.radius + hoop.rimRadius) * cos;
+                    this.y = rimRightY + (this.radius + hoop.rimRadius) * sin;
+
+                    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                    this.vx = speed * cos * 0.7;
+                    this.vy = speed * sin * 0.7;
+                }
+
+                // 4. فحص التسجيل (الكرة تمر بين الطوقين من الأعلى للأسفل)
+                if (this.canScore) {
+                    const rimLevelY = hoop.y;
+                    
+                    // الشرط الأفقي: يجب أن يكون مركز الكرة فوق منطقة الطوق بالكامل
+                    // هذا أسهل من حساب الفتحة الداخلية
+                    const isHorizontallyAligned = this.x > hoop.x && this.x < hoop.x + hoop.ringWidth;
+
+                    if (isHorizontallyAligned) {
+                        // الشرط العمودي 1: تقع الكرة بالكامل فوق مستوى الطوق (إعداد isAboveRim)
+                        if (this.y + this.radius < rimLevelY) {
+                            this.isAboveRim = true;
+                        } 
+                        
+                        // الشرط العمودي 2: الكرة مرت للأسفل (التسجيل)
+                        // الكرة تسجل نقطة عندما يكون مركزها قد تجاوز مستوى الطوق، بعد أن كانت فوقه (isAboveRim).
+                        if (this.y > rimLevelY && this.isAboveRim) { 
+                            // هدف!
+                            this.canScore = false; 
+                            this.isAboveRim = false;
+                            addScore();
+                            return; // توقف عن التحقق لتجنب تشغيل منطق الضياع في نفس الإطار
+                        }
+                    } 
+                    
+                    // منطق تحديد "الرمية الضائعة"
+                    // إذا نزلت الكرة مسافة كافية أسفل الطوق دون أن تسجل، توقف عن محاولة التسجيل
+                    const missedShotY = rimLevelY + hoop.rimRadius + this.radius * 6; // زيادة المسافة (6 أضعاف نصف القطر)
+                    if (this.y > missedShotY && this.isLaunched) {
+                        if (this.canScore) {
+                            showMessage("رمية ضائعة!", 1500);
+                        }
+                        this.canScore = false;
+                        this.isAboveRim = false;
+                    }
+                }
+            }
+
+            reset() {
+                // إعادة الكرة إلى نقطة البداية
+                this.isLaunched = false;
+                this.canScore = true;
+                this.vx = 0;
+                this.vy = 0;
+                this.x = this.originalX;
+                this.y = this.originalY;
+                this.isAboveRim = false;
+                showMessage("اسحب وحرر لإطلاق الكرة!");
+            }
+        }
+
+        class Hoop {
+            constructor(x, y, ringWidth, backboardHeight, backboardThickness, poleHeight) {
+                this.x = x; // حافة الطوق اليسرى
+                this.y = y; // مستوى الطوق
+                this.ringWidth = ringWidth; // عرض الطوق
+                this.rimRadius = 5; // سمك الطوق (الذي يمثل ارتفاع الطوق المرسوم)
+                this.backboardHeight = backboardHeight;
+                this.backboardThickness = backboardThickness;
+                this.poleHeight = poleHeight; // ارتفاع العمود الكلي
+            }
+
+            draw() {
+                // تحديد إحداثيات اللوحة والعمود
+                const backboardThickness = this.backboardThickness;
+                const backboardX = this.x + this.ringWidth + 5;
+                const backboardY = this.y - this.backboardHeight + 5;
+                const backboardCenterY = backboardY + this.backboardHeight / 2;
+                const backboardRightEdge = backboardX + backboardThickness;
+                
+                // 1. العمود الرئيسي (Pole) - يبدأ من خلف اللوحة ويمتد للأسفل
+                const poleWidth = 10;
+                const poleX = backboardRightEdge + poleWidth;
+                const poleStartY = backboardY + backboardThickness;
+                const poleEndY = canvas.height; // يمتد إلى الأرضية
+                
+                // تدرج لوني لجعل العمود يبدو معدنياً
+                const poleGradient = ctx.createLinearGradient(poleX - poleWidth / 2, poleStartY, poleX + poleWidth / 2, poleEndY);
+                poleGradient.addColorStop(0, '#6b7280'); 
+                poleGradient.addColorStop(0.5, '#9ca3af'); 
+                poleGradient.addColorStop(1, '#6b7280'); 
+
+                ctx.fillStyle = poleGradient;
+                ctx.fillRect(poleX - poleWidth / 2, poleStartY, poleWidth, poleEndY - poleStartY);
+                
+                // 2. اللوحة الخلفية (Backboard)
+                
+                // القاعدة الداعمة للوحة (أغمق) - لإضافة عمق
+                ctx.fillStyle = '#4a5568'; 
+                ctx.fillRect(backboardX, backboardY - 5, backboardThickness, this.backboardHeight + 10);
+
+                // اللوحة الرئيسية (أبيض)
+                ctx.fillStyle = '#ffffff'; 
+                ctx.fillRect(backboardX, backboardY, backboardThickness, this.backboardHeight);
+                ctx.strokeStyle = '#2d3748';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(backboardX, backboardY, backboardThickness, this.backboardHeight);
+
+                // المستطيل الداخلي الأحمر (للتصويب)
+                const innerBoxWidth = 50;
+                const innerBoxHeight = 40;
+                const innerBoxX = backboardX + backboardThickness / 2 - innerBoxWidth / 2;
+                const innerBoxY = backboardY + this.backboardHeight - innerBoxHeight - 10;
+                ctx.strokeStyle = '#dd6b20'; // لون أحمر غامق
+                ctx.lineWidth = 3;
+                ctx.strokeRect(innerBoxX, innerBoxY, innerBoxWidth, innerBoxHeight);
+                
+                // 3. الذراع الداعمة (Support Arm) - من العمود إلى الطوق
+                const armColor = '#6b7280';
+                const armThickness = 5;
+
+                ctx.fillStyle = armColor;
+                ctx.strokeStyle = '#4b5563';
+                ctx.lineWidth = 1;
+                
+                // رسم الذراع بشكل مثلث أو مائل للحصول على دعم حقيقي
+                ctx.beginPath();
+                ctx.moveTo(backboardRightEdge + armThickness, backboardCenterY); // نقطة البداية على اللوحة
+                ctx.lineTo(this.x + this.ringWidth / 2, this.y + this.rimRadius); // نقطة النهاية على منتصف الطوق
+                ctx.lineTo(backboardRightEdge, backboardCenterY); // العودة إلى اللوحة
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                // 4. الطوق (Rim) - يتم رسمه في المقدمة بعد الذراع
+                
+                // تدرج لجعل الطوق يبدو مستديراً (تأثير ثلاثي الأبعاد)
+                const rimGradient = ctx.createLinearGradient(this.x, this.y, this.x, this.y + this.rimRadius);
+                rimGradient.addColorStop(0, '#ff9900'); // فاتح جداً (إضاءة علوية)
+                rimGradient.addColorStop(0.5, '#cc5500'); // اللون الأساسي
+                rimGradient.addColorStop(1, '#a03200'); // ظل سفلي
+
+                ctx.fillStyle = rimGradient;
+                ctx.fillRect(this.x, this.y, this.ringWidth, this.rimRadius);
+                
+                // خطوط الحافة لجعلها أكثر وضوحاً
+                ctx.strokeStyle = '#a03200';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(this.x, this.y, this.ringWidth, this.rimRadius);
+
+                // 5. الشبكة (Net) - رسم أكثر واقعية
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'; // أبيض شبه شفاف
+                ctx.lineWidth = 1.5; // سمك أكبر قليلاً
+                const netHeight = 50; // زيادة ارتفاع الشبكة
+                const netSegments = 10;
+                const segmentWidth = this.ringWidth / netSegments;
+                const startY = this.y + this.rimRadius;
+                const endY = startY + netHeight;
+
+                // الخطوط العمودية المائلة
+                for (let i = 0; i <= netSegments; i++) {
+                    const x = this.x + i * segmentWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(x, startY);
+                    // الميلان المخروطي لتمثيل الشبكة
+                    const endX = this.x + i * segmentWidth + (i - netSegments / 2) * 3; 
+                    ctx.lineTo(endX, endY);
+                    ctx.stroke();
+                }
+
+                // خطوط الأربطة الأفقية
+                const tieLines = 5; // زيادة عدد الخطوط الأفقية
+                ctx.lineWidth = 0.5; // اجعلها أرفع
+                for (let j = 1; j < netSegments; j++) {
+                    const tieY = startY + (j / netSegments) * netHeight;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + (j * 0.5), tieY);
+                    ctx.lineTo(this.x + this.ringWidth - (j * 0.5), tieY);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function initGame() {
+            // تحديد حجم اللوحة بناءً على حجم النافذة
+            const maxCanvasWidth = 600;
+            const maxCanvasHeight = 400;
+            canvas.width = Math.min(maxCanvasWidth, window.innerWidth - 40);
+            canvas.height = Math.min(maxCanvasHeight, canvas.width * (4 / 6)); // الحفاظ على نسبة العرض إلى الارتفاع تقريباً
+
+            // تهيئة الكرة (في الزاوية السفلية اليسرى)
+            const ballRadius = canvas.width * 0.05;
+            const startPointX = ballRadius * 2;
+            const startPointY = canvas.height - ballRadius * 2;
+            ball = new Ball(startPointX, startPointY, ballRadius, '#ff9900');
+
+            // تهيئة الطوق (في الزاوية العلوية اليمنى)
+            const hoopWidth = canvas.width * 0.15;
+            const hoopX = canvas.width - hoopWidth - 50;
+            const hoopY = canvas.height * 0.5;
+            const backboardHeight = canvas.height * 0.3;
+            // Pole Height لم تعد تحدد ارتفاع العمود بل هي قيمة عامة في Constructor
+            const poleHeight = canvas.height * 0.3; 
+            hoop = new Hoop(hoopX, hoopY, hoopWidth, backboardHeight, 5, poleHeight);
+
+            score = 0;
+            scoreValue.textContent = score;
+
+            // إعداد مستمعي الأحداث للماوس واللمس
+            canvas.addEventListener('mousedown', handleStart);
+            canvas.addEventListener('mousemove', handleMove);
+            canvas.addEventListener('mouseup', handleEnd);
+            canvas.addEventListener('touchstart', handleStart);
+            canvas.addEventListener('touchmove', handleMove);
+            canvas.addEventListener('touchend', handleEnd);
+            window.addEventListener('resize', initGame); // إعادة التهيئة عند تغيير حجم النافذة
+
+            // بدء حلقة اللعبة
+            gameLoop();
+        }
+
+        // رسم خط التصويب (الآن لا يحتاج إلى معاملات، يستخدم المتغيرات العامة)
+        function drawAimLine() {
+            // رسم خط التصويب
+            ctx.strokeStyle = '#f6ad55'; // لون برتقالي فاتح
+            ctx.lineWidth = 3;
+            ctx.setLineDash([5, 5]); // خط متقطع
+
+            ctx.beginPath();
+            ctx.moveTo(ball.x, ball.y); // ابدأ من مركز الكرة
+            // تحديد نقطة النهاية بناءً على السحب (عكس اتجاه السحب)
+            // startX/startY: نقطة النقر الأولية
+            // currentDragX/Y: الموضع الحالي للمؤشر
+            const dx = currentDragX - startX;
+            const dy = currentDragY - startY;
+
+            // رسم الخط في الاتجاه المعاكس للسحب
+            const endX = ball.x - dx * 0.5; // قوة دفع أقل من مسافة السحب
+            const endY = ball.y - dy * 0.5;
+
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            ctx.setLineDash([]); // إعادة الخط إلى وضعه الأصلي
+        }
+
+        // معالجات أحداث الماوس واللمس
+        function getCoords(event) {
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+
+            if (event.touches && event.touches.length > 0) {
+                // أحداث اللمس
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            } else {
+                // أحداث الماوس
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
+
+        function handleStart(event) {
+            if (ball.isLaunched) return;
+            const pos = getCoords(event);
+
+            // التحقق من أن النقر بدأ بالقرب من الكرة
+            const dx = pos.x - ball.x;
+            const dy = pos.y - ball.y;
+            if (Math.sqrt(dx * dx + dy * dy) < ball.radius * 2) {
+                isDragging = true;
+                // تخزين نقطة البداية (الأولية)
+                startX = pos.x;
+                startY = pos.y;
+                // تهيئة الموضع الحالي للسحب
+                currentDragX = pos.x; 
+                currentDragY = pos.y; 
+                event.preventDefault(); // منع التمرير على اللمس
+            }
+        }
+
+        function handleMove(event) {
+            if (!isDragging || ball.isLaunched) return;
+            const pos = getCoords(event);
+            
+            // تحديث موضع السحب الحالي فقط
+            currentDragX = pos.x; 
+            currentDragY = pos.y; 
+            
+            event.preventDefault(); // منع التمرير على اللمس
+        }
+
+        function handleEnd(event) {
+            if (!isDragging || ball.isLaunched) return;
+
+            const endPos = getCoords(event);
+
+            // تحديد قوة الرمي كنسبة من مسافة السحب
+            const dx = startX - endPos.x;
+            const dy = startY - endPos.y;
+
+            // تحديد سرعة الرمي بناءً على مسافة السحب. الحد الأقصى للسرعة لمنع رميات ضخمة
+            const launchPower = 0.15;
+            const maxVelocity = 25;
+
+            ball.vx = Math.min(Math.max(dx * launchPower, -maxVelocity), maxVelocity);
+            ball.vy = Math.min(Math.max(dy * launchPower, -maxVelocity), maxVelocity);
+
+            ball.isLaunched = true;
+            isDragging = false;
+            showMessage("الكرة في الجو...");
+
+            event.preventDefault(); // منع التمرير على اللمس
+        }
+
+
+        function addScore() {
+            score++;
+            scoreValue.textContent = score;
+            showMessage("هدف! (+1 نقطة)", 2000);
+        }
+
+        function showMessage(text, duration = 0) {
+            messageBox.textContent = text;
+            if (duration > 0) {
+                clearTimeout(messageBox.timeout);
+                messageBox.timeout = setTimeout(() => {
+                    messageBox.textContent = "اسحب وحرر لإطلاق الكرة!";
+                }, duration);
+            }
+        }
+
+        function drawGame() {
+            // مسح الشاشة
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // رسم سماء مبسطة
+            const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            skyGradient.addColorStop(0, '#63b3ed'); // أزرق فاتح
+            skyGradient.addColorStop(1, '#a0aec0'); // رمادي الملعب
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // رسم الطوق والعمود أولاً (خلف الكرة)
+            hoop.draw();
+
+            // رسم خط التصويب إذا كان المستخدم يسحب
+            if (isDragging && !ball.isLaunched) {
+                drawAimLine();
+            }
+
+            // رسم الكرة
+            ball.draw();
+        }
+
+        function gameLoop() {
+            // تحديث حالة اللعبة
+            ball.update();
+
+            // إعادة رسم المشهد
+            drawGame();
+
+            // استدعاء الحلقة التالية
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resetGame() {
+            ball.reset();
+            score = 0;
+            scoreValue.textContent = score;
+            showMessage("تمت إعادة تعيين اللعبة.");
+        }
+
+        // ابدأ اللعبة عند تحميل النافذة
+        window.onload = initGame;
+
+    </script>
+</body>
+</html>
